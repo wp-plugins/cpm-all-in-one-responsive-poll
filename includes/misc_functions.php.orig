@@ -1,0 +1,646 @@
+<?php
+/**
+ * Get Ip function
+ */
+
+if( !function_exists('get_current_user_ip') ) :
+    function get_current_user_ip() {
+        if (!empty($_SERVER['HTTP_CLIENT_IP'])) :
+            $cpm_wp_poll_user_ip = $_SERVER['HTTP_CLIENT_IP'];
+        elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) :
+            $cpm_wp_poll_user_ip = $_SERVER['HTTP_X_FORWARDED_FOR'];
+        else :
+            $cpm_wp_poll_user_ip = $_SERVER['REMOTE_ADDR'];
+        endif;
+        return $cpm_wp_poll_user_ip;
+    }
+endif;
+
+/**
+ * Get Translated Poll ids when WPML exists
+ */
+
+if( !function_exists('cpm_poll_get_traslated_languages') ) :
+    function cpm_poll_get_traslated_languages($cpm_wp_poll_id) {
+        if( class_exists('SitePress') ) {
+            $all_languages = icl_get_languages('skip_missing=N&orderby=KEY&order=DIR&link_empty_to=str');
+            $all_translated_posts = array();
+            foreach( $all_languages as $lanugage_key => $lanugage_value ) {
+               $translated_post_id = icl_object_id($cpm_wp_poll_id, 'cpm_wp_poll', false, $lanugage_value['language_code']);
+               if( !is_null($translated_post_id) )
+                   array_push($all_translated_posts, $translated_post_id);
+            } //foreach end
+        } else {
+            $all_translated_posts = array( $cpm_wp_poll_id );
+        }
+        return $all_translated_posts;
+    } //function end
+endif; //function_exists
+
+/**
+ * Independent voting results from all translated ids
+ * @ param
+ * takes $all_translated_posts as array
+ * returns poll meta for all translated posts
+ */
+
+if( !function_exists('cpm_wp_poll_get_independent_poll_meta') ) :
+    function cpm_wp_poll_get_independent_poll_meta($all_translated_posts) {
+        $original_voting_results = array();
+        foreach ($all_translated_posts as $all_translated_post) {
+            $indenpendent_voting_results = get_post_meta( $all_translated_post, 'cpm_wp_poll_votes', true );
+            array_push($original_voting_results, $indenpendent_voting_results);
+        }
+        return $original_voting_results;
+    } //end of function
+endif; //end of function exists
+
+/**
+ * vote function for radio buttons
+ * takes new combined array with post id key and its poll meta
+ * returns null
+ */
+
+if( !function_exists('cpm_poll_vote_radio') ) :
+    function cpm_poll_vote_radio($new_original_voting_results_with_id, $poll_option_voted) {
+        foreach ($new_original_voting_results_with_id as $original_voting_result_post_id => $original_voting_result_value ) {
+            //Gives voting result for each posts
+            foreach ($original_voting_result_value as $original_voting_result_key => $original_voting_result_individual_value) {
+                if( $original_voting_result_key == $poll_option_voted ) {
+                    $old_voting_result_value = $original_voting_result_individual_value['total_votes'];
+                    $new_voting_result_value = $old_voting_result_value + 1;
+                    $original_voting_result_value[$original_voting_result_key]['total_votes'] = $new_voting_result_value;
+                    update_post_meta( $original_voting_result_post_id, 'cpm_wp_poll_votes', $original_voting_result_value );
+                }
+            }
+        }
+    } //end of function
+endif; //end of function exists
+
+/**
+ * vote function for checkbox option
+ * takes new combined array with post id key and its poll meta
+ * returns null
+ */
+
+if( !function_exists('cpm_poll_vote_checkbox') ) :
+    function cpm_poll_vote_checkbox($new_original_voting_results_with_id, $poll_option_voted) {
+        foreach ($new_original_voting_results_with_id as $original_voting_result_post_id => $original_voting_result_value ) {
+            foreach ($original_voting_result_value as $original_voting_result_key => $original_voting_result_individual_value) {
+                foreach ( $poll_option_voted as $poll_option_voted_unique ) {
+                    if( $original_voting_result_key == $poll_option_voted_unique ) {
+                        $old_voting_result_value = $original_voting_result_individual_value['total_votes'];
+                        $new_voting_result_value = $old_voting_result_value + 1;
+                        $original_voting_result_value[$original_voting_result_key]['total_votes'] = $new_voting_result_value;
+                        update_post_meta( $original_voting_result_post_id, 'cpm_wp_poll_votes', $original_voting_result_value );
+                    }
+                }
+            }
+        }
+    } //end of function
+endif; //end of function exists
+
+/**
+ * Frontend function for shortcode and widget body
+ * Returns either form or Doughnut
+ */
+
+if( !function_exists('cpm_poll_the_poll_doughnut') ) :
+    function cpm_poll_the_poll_doughnut($poll_id, $from) {
+        $already_voted = user_already_voted($poll_id);
+        $poll_options_array = get_post_meta($poll_id, 'cpm_wp_poll_votes', true);
+        $poll_option_allow_multiple = get_post_meta($poll_id, 'cpm_poll_multiple_value', true);
+        if( $poll_option_allow_multiple <= 0 ) :
+            echo '<script> var checkBox = false; </script>';
+        else:
+            echo '<script> var checkBox = true; </script>';
+        endif;
+        $poll_data_for_chart = array();
+        echo poll_question_generator($poll_id, $poll_options_array, $already_voted, $poll_option_allow_multiple,$from);
+        ?>
+        <!-- Result -->
+            <?php
+                foreach ($poll_options_array as $options => $votes) :
+                    //building json
+                    $poll_data_array = array( 'label' => $votes['poll_question'], 'value' => $votes['total_votes'], 'color' => $votes['vote_option_color'] );
+                    array_push($poll_data_for_chart, $poll_data_array);
+                endforeach;
+                $poll_data_for_chart_json = json_encode($poll_data_for_chart);
+            ?>
+            <div class="cpm-poll-shortcode-container voting-result" id="voting-result-<?php echo $poll_id.'-'.$from;?>" <?php if( $already_voted == false ) echo 'style="display:none"'; else echo 'style="display:block"';?>>
+                <div id="canvas-holder-<?php echo $poll_id.'-'.$from;?>" style="padding-top:20px; width:568px;" class="canvas-holder">
+                  <canvas id="chart-area-<?php echo $poll_id.'-'.$from;?>"></canvas>
+                </div>
+                <div id="legend-<?php echo $poll_id.'-'.$from;?>" class="common-legend"></div>
+            </div>
+            <script  src="//cdnjs.cloudflare.com/ajax/libs/numeral.js/1.4.5/numeral.min.js"></script>
+            <script type="text/javascript">
+                <?php if( $poll_option_allow_multiple > 0 ) : ?>
+                    var max = <?php echo (int)$poll_option_allow_multiple; ?>;
+                    var checkboxes = jQuery('.cpm-input-group-addon input[type="checkbox"]');
+                    checkboxes.change(function(){
+                        var current = checkboxes.filter(':checked').length;
+                        checkboxes.filter(':not(:checked)').prop('disabled', current >= max);
+                    });
+                <?php endif; ?>
+                //Building Chart
+                var doughnutData = <?php echo $poll_data_for_chart_json; ?>;
+                window.onload = function(){
+                    var ctx = document.getElementById("chart-area-<?php echo $poll_id.'-'.$from;?>").getContext("2d");
+                    var chartOption = {
+                                        responsive : true,
+                                        animation : true,
+                                        animationEasing: "easeOutQuart",
+                                        showScale: true,
+                                        legendTemplate : "<ul class=\"<%=name.toLowerCase()%>-legend\"><% for (var i=0; i<segments.length; i++){%><li><span style=\"background-color:<%=segments[i].fillColor%>\"></span><%if(segments[i].label){%><%=segments[i].label%><%}%></li><%}%></ul>",
+                                        tooltipTemplate: "<%=label%>: <%= numeral(circumference / 6.283).format('(0[.][00]%)') %>"
+                                    }
+                    window.cpmDoughnut = new Chart(ctx).Doughnut(doughnutData, chartOption);
+                    var legend = cpmDoughnut.generateLegend();
+                    jQuery("#legend-<?php echo $poll_id.'-'.$from;?>").html(legend);
+                };
+            </script>
+<?php  }//end of function body
+endif; //end of function exists
+/**
+ * Frontend function for shortcode and widget body
+ * Returns either form or progress bar
+ */
+
+if( !function_exists('cpm_poll_the_poll_progress_bar') ) :
+    function cpm_poll_the_poll_progress_bar( $poll_id, $from ) {
+        $already_voted = user_already_voted($poll_id);
+        $poll_options_array = get_post_meta($poll_id, 'cpm_wp_poll_votes', true);
+        $poll_option_allow_multiple = get_post_meta($poll_id, 'cpm_poll_multiple_value', true);
+        if( $poll_option_allow_multiple <= 0 ) :
+            echo '<script> var checkBox = false; </script>';
+        else:
+            echo '<script> var checkBox = true; </script>';
+        endif;
+        $poll_data_for_chart = array();
+        echo poll_question_generator($poll_id, $poll_options_array, $already_voted, $poll_option_allow_multiple,$from);
+        ?>
+
+        <!-- Result -->
+            <div class="cpm-poll-shortcode-container voting-result" id="voting-result-<?php echo $poll_id.'-'.$from;?>" <?php if( $already_voted == false ) echo 'style="display:none"'; else echo 'style="display:block"';?>>
+                <div class="cpm-poll-question"><?php echo get_the_title($poll_id); ?></div>
+                <div id="canvas-holder-<?php echo $poll_id.'-'.$from;?>" style="padding-top:20px; width:568px;" class="canvas-holder" >
+                    <?php
+                        $grand_total_votes = 0;
+                        foreach ($poll_options_array as $options => $votes) {
+                            $grand_total_votes += $votes['total_votes'];
+                        }
+                        foreach ($poll_options_array as $options => $votes) :
+                            $vote_percentage = ($votes['total_votes']/$grand_total_votes) * 100;
+                        ?>
+                            <div class="progress">
+                              <div class="progress-bar progress-bar-striped active" role="progressbar" aria-valuenow="60" aria-valuemin="0" aria-valuemax="100" style="width: <?php echo round($vote_percentage, 2);?>%; background-color:<?php echo $votes['vote_option_color'];?>">
+                                <span class="sr-only"><?php echo round($vote_percentage, 2).'%';?></span>
+                              </div>
+                            </div>
+                        <?php endforeach; ?>
+                </div>
+            </div>
+        <script type="text/javascript">
+            <?php if( $poll_option_allow_multiple > 0 ) : ?>
+                var max = <?php echo (int)$poll_option_allow_multiple; ?>;
+                var checkboxes = jQuery('.cpm-input-group-addon input[type="checkbox"]');
+                checkboxes.change(function() {
+                    var current = checkboxes.filter(':checked').length;
+                    checkboxes.filter(':not(:checked)').prop('disabled', current >= max);
+                });
+            <?php endif; ?>
+        </script>
+    <?php }
+endif;
+/**
+ * Frontend function to show shortcode and widget body
+ * Returns either form or Pie chart
+ */
+if( !function_exists('cpm_poll_the_poll_pie') ) :
+    function cpm_poll_the_poll_pie( $poll_id, $from ) {
+        $already_voted = user_already_voted($poll_id);
+        $poll_options_array = get_post_meta($poll_id, 'cpm_wp_poll_votes', true);
+        $poll_option_allow_multiple = get_post_meta($poll_id, 'cpm_poll_multiple_value', true);
+        if( $poll_option_allow_multiple <= 0 ) :
+            echo '<script> var checkBox = false; </script>';
+        else:
+            echo '<script> var checkBox = true; </script>';
+        endif;
+        $poll_data_for_chart = array();
+        echo poll_question_generator($poll_id, $poll_options_array, $already_voted, $poll_option_allow_multiple,$from);
+        ?>
+        <!-- Result -->
+            <?php
+                foreach ($poll_options_array as $options => $votes) :
+                    //building json
+                    $poll_data_array = array( 'label' => $votes['poll_question'], 'value' => $votes['total_votes'], 'color' => $votes['vote_option_color'] );
+                    array_push($poll_data_for_chart, $poll_data_array);
+                endforeach;
+                $poll_data_for_chart_json = json_encode($poll_data_for_chart);
+            ?>
+            <div class="cpm-poll-shortcode-container voting-result" id="voting-result-<?php echo $poll_id.'-'.$from;?>" <?php if( $already_voted == false ) echo 'style="display:none"'; else echo 'style="display:block"';?>>
+                <div id="canvas-holder-<?php echo $poll_id.'-'.$from;?>" style="padding-top:20px; width:568px;" class="canvas-holder">
+                  <canvas id="chart-area-<?php echo $poll_id.'-'.$from;?>" ></canvas>
+                </div>
+                <div id="legend-<?php echo $poll_id.'-'.$from;?>" class="common-legend"></div>
+            </div>
+            <script  src="//cdnjs.cloudflare.com/ajax/libs/numeral.js/1.4.5/numeral.min.js"></script>
+            <script type="text/javascript">
+                <?php if( $poll_option_allow_multiple > 0 ) : ?>
+                    var max = <?php echo (int)$poll_option_allow_multiple; ?>;
+                    var checkboxes = jQuery('.cpm-input-group-addon input[type="checkbox"]');
+                    checkboxes.change(function(){
+                        var current = checkboxes.filter(':checked').length;
+                        checkboxes.filter(':not(:checked)').prop('disabled', current >= max);
+                    });
+                <?php endif; ?>
+                //Building Chart
+                var pieData = <?php echo $poll_data_for_chart_json; ?>;
+                window.onload = function(){
+                    var ctx = document.getElementById("chart-area-<?php echo $poll_id.'-'.$from;?>").getContext("2d");
+                    var chartOption = {
+                                    responsive : true,
+                                    animation : true,
+                                    animationEasing: "easeOutQuart",
+                                    showScale: true,
+                                    legendTemplate : "<ul class=\"<%=name.toLowerCase()%>-legend\"><% for (var i=0; i<segments.length; i++){%><li><span style=\"background-color:<%=segments[i].fillColor%>\"></span><%if(segments[i].label){%><%=segments[i].label%><%}%></li><%}%></ul>",
+                                    tooltipTemplate: "<%=label%>: <%= numeral(circumference / 6.283).format('(0[.][00]%)') %>"
+                                    }
+                    window.cpmPie = new Chart(ctx).Pie(pieData, chartOption);
+                    var legend = cpmPie.generateLegend();
+                    jQuery("#legend-<?php echo $poll_id.'-'.$from;?>").html(legend);
+                };
+            </script>
+<?php  }//end of function body
+endif; //end of function exists
+
+/**
+ * Frontend function to show shortcode and widget body
+ * Returns either form or Polar chart
+ */
+if( !function_exists('cpm_poll_the_poll_polar') ) :
+    function cpm_poll_the_poll_polar($poll_id, $from) {
+        $already_voted = user_already_voted($poll_id);
+        $poll_options_array = get_post_meta($poll_id, 'cpm_wp_poll_votes', true);
+        $poll_option_allow_multiple = get_post_meta($poll_id, 'cpm_poll_multiple_value', true);
+        if( $poll_option_allow_multiple <= 0 ) :
+            echo '<script> var checkBox = false; </script>';
+        else:
+            echo '<script> var checkBox = true; </script>';
+        endif;
+        $poll_data_for_chart = array();
+        echo poll_question_generator($poll_id, $poll_options_array, $already_voted, $poll_option_allow_multiple,$from);
+        ?>
+        <!-- Result -->
+            <?php
+                foreach ($poll_options_array as $options => $votes) :
+                    //building json
+                    $poll_data_array = array( 'label' => $votes['poll_question'], 'value' => $votes['total_votes'], 'color' => $votes['vote_option_color'] );
+                    array_push($poll_data_for_chart, $poll_data_array);
+                endforeach;
+                $poll_data_for_chart_json = json_encode($poll_data_for_chart);
+            ?>
+            <div class="cpm-poll-shortcode-container voting-result" id="voting-result-<?php echo $poll_id.'-'.$from;?>" <?php if( $already_voted == false ) echo 'style="display:none"'; else echo 'style="display:block"';?>>
+                <div id="canvas-holder-<?php echo $poll_id.'-'.$from;?>" style="padding-top:20px; width:568px;" class="canvas-holder">
+                  <canvas id="chart-area-<?php echo $poll_id.'-'.$from;?>" ></canvas>
+                </div>
+                 <div id="legend-<?php echo $poll_id.'-'.$from;?>" class="common-legend"></div>
+            </div>
+            <script  src="//cdnjs.cloudflare.com/ajax/libs/numeral.js/1.4.5/numeral.min.js"></script>
+            <script type="text/javascript">
+                <?php if( $poll_option_allow_multiple > 0 ) : ?>
+                    var max = <?php echo (int)$poll_option_allow_multiple; ?>;
+                    var checkboxes = jQuery('.cpm-input-group-addon input[type="checkbox"]');
+                    checkboxes.change(function(){
+                        var current = checkboxes.filter(':checked').length;
+                        checkboxes.filter(':not(:checked)').prop('disabled', current >= max);
+                    });
+                <?php endif; ?>
+                //Building Chart
+                var polarData = <?php echo $poll_data_for_chart_json; ?>;
+                window.onload = function(){
+                    var ctx = document.getElementById("chart-area-<?php echo $poll_id.'-'.$from;?>").getContext("2d");
+                    var chartOption = {
+                                        responsive : true,
+                                        animation : true,
+                                        animationEasing: "easeOutQuart",
+                                        showScale: true,
+                                        legendTemplate : "<ul class=\"<%=name.toLowerCase()%>-legend\"><% for (var i=0; i<segments.length; i++){%><li><span style=\"background-color:<%=segments[i].fillColor%>\"></span><%if(segments[i].label){%><%=segments[i].label%><%}%></li><%}%></ul>",
+                                        tooltipTemplate: "<%=label%>: <%= numeral(circumference / 6.283).format('(0[.][00]%)') %>"
+                                    }
+                    window.cpmPolar = new Chart(ctx).PolarArea(polarData, chartOption);
+                    var legend = cpmPolar.generateLegend();
+                     jQuery("#legend-<?php echo $poll_id.'-'.$from;?>").html(legend);
+                };
+            </script>
+<?php  }//end of function body
+endif; //end of function exists
+
+/**
+ * Frontend function to show shortcode and widget body
+ * Returns either form or Bar chart
+ */
+if( !function_exists('cpm_poll_the_poll_bar') ) :
+    function cpm_poll_the_poll_bar($poll_id, $from) {
+        $already_voted = user_already_voted($poll_id);
+        $poll_options_array = get_post_meta($poll_id, 'cpm_wp_poll_votes', true);
+        $poll_option_allow_multiple = get_post_meta($poll_id, 'cpm_poll_multiple_value', true);
+        if( $poll_option_allow_multiple <= 0 ) :
+            echo '<script> var checkBox = false; </script>';
+        else:
+            echo '<script> var checkBox = true; </script>';
+        endif;
+        $poll_data_for_chart = array();
+        $poll_data_lables = array();
+        $poll_data_bar_colors = array();
+        echo poll_question_generator($poll_id, $poll_options_array, $already_voted, $poll_option_allow_multiple,$from);
+        ?>
+
+        <!-- Result -->
+            <?php
+                foreach ($poll_options_array as $options => $votes) :
+                    //building json
+                    $poll_data_array =  $votes['total_votes'] ;
+                    array_push($poll_data_for_chart, $poll_data_array);
+                    array_push($poll_data_lables, $votes['poll_question']);
+                    array_push($poll_data_bar_colors, $votes['vote_option_color']);
+                endforeach;
+                $poll_data_lables_json = json_encode($poll_data_lables);
+                $poll_data_for_chart_json = json_encode($poll_data_for_chart);
+                $poll_data_bar_colors_json = json_encode($poll_data_bar_colors);
+            ?>
+            <div class="cpm-poll-shortcode-container voting-result" id="voting-result-<?php echo $poll_id.'-'.$from;?>" <?php if( $already_voted == false ) echo 'style="display:none"'; else echo 'style="display:block"';?>>
+                <div id="canvas-holder-<?php echo $poll_id.'-'.$from;?>" style="padding-top:20px; width:568px;" class="canvas-holder">
+                  <canvas id="chart-area-<?php echo $poll_id.'-'.$from;?>" ></canvas>
+                </div>
+                <div id="legend-<?php echo $poll_id.'-'.$from;?>" class="common-legend"></div>
+            </div>
+            <script  src="//cdnjs.cloudflare.com/ajax/libs/numeral.js/1.4.5/numeral.min.js"></script>
+            <script type="text/javascript">
+                <?php if( $poll_option_allow_multiple > 0 ) : ?>
+                    var max = <?php echo (int)$poll_option_allow_multiple; ?>;
+                    var checkboxes = jQuery('.cpm-input-group-addon input[type="checkbox"]');
+                    checkboxes.change(function(){
+                        var current = checkboxes.filter(':checked').length;
+                        checkboxes.filter(':not(:checked)').prop('disabled', current >= max);
+                    });
+                <?php endif; ?>
+                //Building Chart
+                var barData = <?php echo $poll_data_for_chart_json; ?>;
+                var barLables = <?php echo $poll_data_lables_json; ?>;
+                var barFillColors = <?php echo $poll_data_bar_colors_json; ?>;
+                var barChartData = {
+                    labels: barLables,
+                    datasets: [
+                        {
+                            label: "<?php echo get_the_title($poll_id);?>",
+                            fillColor: "rgba(220,220,220,0.5)",
+                            highlightStroke: "rgba(220,220,220,1)",
+                            data: barData
+                        }
+                    ]
+                };
+                var newChartOption = {
+                                    responsive : true,
+                                    animation : true,
+                                    animationEasing: "easeOutQuart",
+                                    showScale: true
+                                }
+                window.onload = function(){
+                    var ctx = document.getElementById("chart-area-<?php echo $poll_id.'-'.$from;?>").getContext("2d");
+                    window.myObjBar = new Chart(ctx).Bar(barChartData, newChartOption );
+                    jQuery.each(myObjBar.datasets[0].bars, function(index, val) {
+                       val.fillColor = barFillColors[index];
+                       val.highlightFill = barFillColors[index];
+                    });
+                    myObjBar.update();
+                }
+            </script>
+<?php  }//end of function body
+endif; //end of function exists
+
+/**
+ * Frontend function to show shortcode and widget body
+ * Returns either form or Line chart
+ */
+if( !function_exists('cpm_poll_the_poll_line') ) :
+    function cpm_poll_the_poll_line($poll_id, $from) {
+        $poll_options_array = get_post_meta($poll_id, 'cpm_wp_poll_votes', true);
+        $poll_option_allow_multiple = get_post_meta($poll_id, 'cpm_poll_multiple_value', true);
+        if( $poll_option_allow_multiple <= 0 ) :
+            echo '<script> var checkBox = false; </script>';
+        else:
+            echo '<script> var checkBox = true; </script>';
+        endif;
+        $poll_data_for_chart = array();
+        $poll_data_lables = array();
+        $poll_data_line_colors = array();
+        $already_voted = user_already_voted($poll_id);
+        echo poll_question_generator($poll_id, $poll_options_array, $already_voted, $poll_option_allow_multiple,$from);
+        ?>
+        <!-- Result -->
+            <?php
+                foreach ($poll_options_array as $options => $votes) :
+                    //building json
+                    $poll_data_array =  $votes['total_votes'] ;
+                    array_push($poll_data_for_chart, $poll_data_array);
+                    array_push($poll_data_lables, $votes['poll_question']);
+                    array_push($poll_data_line_colors, $votes['vote_option_color']);
+                endforeach;
+                $poll_data_lables_json = json_encode($poll_data_lables);
+                $poll_data_for_chart_json = json_encode($poll_data_for_chart);
+                $poll_data_line_colors_json = json_encode($poll_data_line_colors);
+            ?>
+            <div class="cpm-poll-shortcode-container voting-result" id="voting-result-<?php echo $poll_id.'-'.$from;?>" <?php if( $already_voted == false ) echo 'style="display:none"'; else echo 'style="display:block"';?>>
+                <div id="canvas-holder-<?php echo $poll_id.'-'.$from;?>" class="canvas-holder" style="padding-top:20px; width:568px;" >
+                  <canvas id="chart-area-<?php echo $poll_id.'-'.$from;?>" ></canvas>
+                </div>
+                <div id="legend-<?php echo $poll_id.'-'.$from;?>" class="common-legend"></div>
+            </div>
+            <script  src="//cdnjs.cloudflare.com/ajax/libs/numeral.js/1.4.5/numeral.min.js"></script>
+            <script type="text/javascript">
+                <?php if( $poll_option_allow_multiple > 0 ) : ?>
+                    var max = <?php echo (int)$poll_option_allow_multiple; ?>;
+                    var checkboxes = jQuery('.cpm-input-group-addon input[type="checkbox"]');
+                    checkboxes.change(function(){
+                        var current = checkboxes.filter(':checked').length;
+                        checkboxes.filter(':not(:checked)').prop('disabled', current >= max);
+                    });
+                <?php endif; ?>
+                //Building Chart
+                var lineData = <?php echo $poll_data_for_chart_json; ?>;
+                var barLables = <?php echo $poll_data_lables_json; ?>;
+                var lineFillColors = <?php echo $poll_data_line_colors_json; ?>;
+                var barChartData = {
+                    labels: barLables,
+                    datasets: [
+                        {
+                            label: "<?php echo get_the_title($poll_id);?>",
+                            fillColor: "rgba(220,220,220,0.5)",
+                            highlightStroke: "rgba(220,220,220,1)",
+                            data: lineData
+                        }
+                    ]
+                };
+                var newChartOption = {
+                                    responsive : true,
+                                    animation : true,
+                                    animationEasing: "easeOutQuart",
+                                    showScale: true
+                                }
+
+                window.onload = function(){
+                    var ctx = document.getElementById("chart-area-<?php echo $poll_id.'-'.$from;?>").getContext("2d");
+                    window.myObjLine = new Chart(ctx).Line(barChartData, newChartOption );
+                    jQuery.each(myObjLine.datasets[0].points, function(index, val) {
+                       val.fillColor = lineFillColors[index];
+                       val.highlightFill = lineFillColors[index];
+                    });
+                    myObjLine.update();
+                }
+            </script>
+<?php  }//end of function body
+endif; //end of function exists
+
+/**
+ * Frontend function to show shortcode and widget body
+ * Returns either form or Radar chart
+ */
+if( !function_exists('cpm_poll_the_poll_radar') ) :
+    function cpm_poll_the_poll_radar($poll_id, $from) {
+        $poll_options_array = get_post_meta($poll_id, 'cpm_wp_poll_votes', true);
+        $poll_option_allow_multiple = get_post_meta($poll_id, 'cpm_poll_multiple_value', true);
+        if( $poll_option_allow_multiple <= 0 ) :
+            echo '<script> var checkBox = false; </script>';
+        else:
+            echo '<script> var checkBox = true; </script>';
+        endif;
+        $poll_data_for_chart = array();
+        $poll_data_lables = array();
+        $poll_data_radar_colors = array();
+        $already_voted = user_already_voted($poll_id);
+        echo poll_question_generator($poll_id, $poll_options_array, $already_voted, $poll_option_allow_multiple,$from);
+        ?>
+        <!-- Result -->
+            <?php
+                foreach ($poll_options_array as $options => $votes) :
+                    //building json
+                    $poll_data_array =  $votes['total_votes'] ;
+                    array_push($poll_data_for_chart, $poll_data_array);
+                    array_push($poll_data_lables, $votes['poll_question']);
+                    array_push($poll_data_radar_colors, $votes['vote_option_color']);
+                endforeach;
+                $poll_data_lables_json = json_encode($poll_data_lables);
+                $poll_data_for_chart_json = json_encode($poll_data_for_chart);
+                $poll_data_radar_colors_json = json_encode($poll_data_radar_colors);
+            ?>
+            <div class="cpm-poll-shortcode-container voting-result" id="voting-result-<?php echo $poll_id.'-'.$from;?>" <?php if( $already_voted == false ) echo 'style="display:none"'; else echo 'style="display:block"';?>>
+                <div id="canvas-holder-<?php echo $poll_id.'-'.$from;?>" class="canvas-holder" style="padding-top:20px; width:568px;" >
+                  <canvas id="chart-area-<?php echo $poll_id.'-'.$from;?>" ></canvas>
+                </div>
+                <div id="legend-<?php echo $poll_id.'-'.$from;?>"></div>
+            </div>
+            <script  src="//cdnjs.cloudflare.com/ajax/libs/numeral.js/1.4.5/numeral.min.js"></script>
+            <script type="text/javascript">
+                <?php if( $poll_option_allow_multiple > 0 ) : ?>
+                    var max = <?php echo (int)$poll_option_allow_multiple; ?>;
+                    var checkboxes = jQuery('.cpm-input-group-addon input[type="checkbox"]');
+                    checkboxes.change(function(){
+                        var current = checkboxes.filter(':checked').length;
+                        checkboxes.filter(':not(:checked)').prop('disabled', current >= max);
+                    });
+                <?php endif; ?>
+                //Building Chart
+                var lineData = <?php echo $poll_data_for_chart_json; ?>;
+                var barLables = <?php echo $poll_data_lables_json; ?>;
+                var radarFillColors = <?php echo $poll_data_radar_colors_json; ?>;
+                var radarChartData = {
+                    labels: barLables,
+                    datasets: [
+                        {
+                            label: "<?php echo get_the_title($poll_id);?>",
+                            fillColor: "rgba(220,220,220,0.5)",
+                            highlightStroke: "rgba(220,220,220,1)",
+                            data: lineData
+                        }
+                    ]
+                };
+                var newChartOption = {
+                                    responsive : true,
+                                    animation : true,
+                                    animationEasing: "easeOutQuart",
+                                    showScale: true
+                                }
+
+                window.onload = function(){
+                    var ctx = document.getElementById("chart-area-<?php echo $poll_id.'-'.$from;?>").getContext("2d");
+                    window.myObjRadar = new Chart(ctx).Radar(radarChartData, newChartOption );
+                    jQuery.each(myObjRadar.datasets[0].points, function(index, val) {
+                       val.fillColor = radarFillColors[index];
+                       val.highlightFill = radarFillColors[index];
+                    });
+                    myObjRadar.update();
+                }
+            </script>
+<?php  }//end of function body
+endif; //end of function exists
+
+function poll_question_generator($poll_id, $poll_options_array, $already_voted, $poll_option_allow_multiple, $from) {
+    $chart_type = get_post_meta($poll_id,'cpm_wp_poll_chart_type', true);
+    if( $chart_type == 'progress_bar' )  {
+        $poll_chart_type = 'progress-bar';
+    } elseif( $chart_type == 'pie' ) {
+        $poll_chart_type = 'pie';
+    } elseif( $chart_type == 'doughnut' ) {
+        $poll_chart_type = 'doughnut';
+    } elseif( $chart_type == 'line' ) {
+        $poll_chart_type = 'line';
+    } elseif( $chart_type == 'bar' ) {
+        $poll_chart_type = 'bar';
+    } elseif( $chart_type == 'radar' ) {
+        $poll_chart_type = 'radar';
+    } elseif( $chart_type == 'polar' ) {
+        $poll_chart_type = 'polar';
+    }
+?>
+     <div class="cpm-poll-shortcode-container voting-options" id="voting-options-<?php echo $poll_id.'-'.$from;?>" <?php if( $already_voted == true ) echo 'style="display:none"'; else echo 'style="display:block"';?> >
+            <div class="cpm-poll-question"><?php echo get_the_title($poll_id); ?></div>
+        <?php if( $poll_options_array ) : $first_option = true;
+            foreach ($poll_options_array as $options => $votes) :
+            ?>
+                <div class="cpm-input-group">
+                   <div class="cpm-input-group-addon">
+                        <?php if( $poll_option_allow_multiple <= 0 ) : ?>
+                            <input id="<?php echo strtolower(str_replace(' ', '-', $votes['poll_question']));?>" type="radio" name="cpm_poll_vote_up" poll-key="<?php echo $options;?>" <?php if( $first_option ) echo 'checked="checked"'; ?>>
+                        <?php else: ?>
+                            <input id="<?php echo strtolower(str_replace(' ', '-', $votes['poll_question']));?>" type="checkbox" name="cpm_poll_vote_up" poll-key="<?php echo $options;?>" <?php if( $first_option ) echo 'checked="checked"'; ?>>
+                        <?php endif; ?>
+                        <label  for="<?php echo strtolower(str_replace(' ', '-', $votes['poll_question']));?>"><?php echo $votes['poll_question']; ?></label>
+                   </div>
+                </div><!-- /input-group -->
+        <?php
+            $first_option = false;
+            endforeach;  endif;
+        ?>
+            <a href="javascript:void(0);" class="cpm-wp-poll-vote-button" chart-type="<?php echo $poll_chart_type;?>" data-voteid="<?php echo $poll_id;?>" data-from="<?php echo $from;?>"><?php _e('Vote', '_cpm');?></a>
+        </div>
+<?php
+}
+
+function user_already_voted($poll_id) {
+    $user_ip_address = get_current_user_ip();
+    $user_unique_name = str_replace('.', '_', $user_ip_address);
+    $already_voted = false;
+    $user_who_have_voted = get_option('cpm_wp_poll_voted_user_'.$user_unique_name);
+    if( empty($user_who_have_voted) ) {
+      $already_voted = false;
+    } else {
+      if( in_array($poll_id, $user_who_have_voted) ) {
+        $already_voted = true;
+      } else {
+        $already_voted = false;
+      }
+    }
+    return $already_voted;
+}
