@@ -1,8 +1,8 @@
 <?php
 /*
- * Plugin Name: CPM All in one responsive Poll.
+ * Plugin Name: CPM WP All in one responsive Poll.
  * Plugin URI:  https://codepixelz.market
- * Description: Your ultimate poll solution. CPM All in One Poll lets you create 7 different Poll types, is fully translatable. Has Widgets and Shortcode. Supports multiple polls in a single page and you can also simply show the results of the poll.
+ * Description: Your ultimate poll solution. CPM WP All in One Poll lets you create 7 different Poll types, is fully translatable. Has Widgets and Shortcode. Supports multiple polls in a single page and you can also simply show the results of the poll.
  * Version:     1.0
  * Author:      codepixelzmedia
  * Author URI:  http://codepixelz.market
